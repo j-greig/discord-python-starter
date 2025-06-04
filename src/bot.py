@@ -17,9 +17,10 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_PROMPT = os.getenv("BOT_PROMPT")
-BOT_NAME = os.getenv("BOT_NAME", "HONCHO").upper()
-BOT_NAME_VARIANTS = os.getenv("BOT_NAME_VARIANTS", "")
-BOT_TOPICS = os.getenv("BOT_TOPICS", "")
+BOT_NAME = os.getenv("BOT_NAME", "HONCHO").strip('"')
+BOT_NAME_VARIANTS = os.getenv("BOT_NAME_VARIANTS", "").strip('"')
+BOT_TOPICS = os.getenv("BOT_TOPICS", "").strip('"')
+
 
 MODEL_NAME = os.getenv("MODEL_NAME")
 MODEL_API_KEY = os.getenv("MODEL_API_KEY")
@@ -27,20 +28,32 @@ APP_NAME = os.getenv("APP_NAME")
 
 
 def _build_name_variants():
-    variants = []
+    variants = set()
     
     if BOT_NAME_VARIANTS:
-        variants.extend([v.strip().lower() for v in BOT_NAME_VARIANTS.split(",")])
+        for variant in BOT_NAME_VARIANTS.split(","):
+            clean_variant = variant.strip()
+            if clean_variant:
+                variants.add(clean_variant.lower())
     
     if BOT_NAME:
-        variants.extend([
-            BOT_NAME.lower(),
-            BOT_NAME.upper(),
-        ])
+        variants.add(BOT_NAME.lower())
     
-    return [v for v in variants if v]
+    return list(variants)
+
+def _build_topics():
+    topics = set()
+    if BOT_TOPICS:
+        for topic in BOT_TOPICS.split(","):
+            clean_topic = topic.strip()
+            if clean_topic:
+                topics.add(clean_topic.lower())
+    return list(topics)
 
 NAME_VARIANTS = _build_name_variants()
+TOPIC_VARIANTS = _build_topics()
+
+logger.info(f"Bot configured with {len(NAME_VARIANTS)} name variants and {len(TOPIC_VARIANTS)} topic variants")
 
 honcho_client = Honcho()
 app = honcho_client.apps.get_or_create(name=APP_NAME)
@@ -147,8 +160,7 @@ def relevant_message(message) -> bool:
     """
     Determine if the message contains references to the bot that
     warrant a response even without @mention. Checks for bot name
-    variants configured in BOT_NAME_VARIANTS and auto-generated
-    variations of BOT_NAME.
+    variants configured in BOT_NAME_VARIANTS and topics from BOT_TOPICS.
     """
     if message.author == bot.user:
         return False
@@ -156,7 +168,8 @@ def relevant_message(message) -> bool:
         return False
     
     content = message.content.lower()
-    return any(variant in content for variant in NAME_VARIANTS)
+    return (any(variant in content for variant in NAME_VARIANTS) or
+            any(topic in content for topic in TOPIC_VARIANTS))
 
 
 def sanitize_message(message) -> str | None:
