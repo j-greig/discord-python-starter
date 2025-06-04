@@ -16,10 +16,30 @@ load_dotenv()
 
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_NAME = os.getenv("BOT_NAME", "")
+BOT_NAME_VARIANTS = os.getenv("BOT_NAME_VARIANTS", "")
+BOT_TOPICS = os.getenv("BOT_TOPICS", "")
+
 MODEL_NAME = os.getenv("MODEL_NAME")
 MODEL_API_KEY = os.getenv("MODEL_API_KEY")
 APP_NAME = os.getenv("APP_NAME")
 
+
+def _build_name_variants():
+    variants = []
+    
+    if BOT_NAME_VARIANTS:
+        variants.extend([v.strip().lower() for v in BOT_NAME_VARIANTS.split(",")])
+    
+    if BOT_NAME:
+        variants.extend([
+            BOT_NAME.lower(),
+            BOT_NAME.upper(),
+        ])
+    
+    return [v for v in variants if v]
+
+NAME_VARIANTS = _build_name_variants()
 
 honcho_client = Honcho()
 app = honcho_client.apps.get_or_create(name=APP_NAME)
@@ -84,6 +104,22 @@ def validate_message(message) -> bool:
     return True
 
 
+def relevant_message(message) -> bool:
+    """
+    Determine if the message contains references to the bot that
+    warrant a response even without @mention. Checks for bot name
+    variants configured in BOT_NAME_VARIANTS and auto-generated
+    variations of BOT_NAME.
+    """
+    if message.author == bot.user:
+        return False
+    if isinstance(message.channel, discord.DMChannel):
+        return False
+    
+    content = message.content.lower()
+    return any(variant in content for variant in NAME_VARIANTS)
+
+
 def sanitize_message(message) -> str | None:
     """Remove the bot's mention from the message content if present"""
     content = message.content.replace(f"<@{bot.user.id}>", "").strip()
@@ -145,7 +181,8 @@ async def on_message(message):
     Receive a message from Discord and respond with a message from our LLM assistant.
     """
     if not validate_message(message):
-        return
+        if not relevant_message(message):
+            return
 
     input = sanitize_message(message)
 
