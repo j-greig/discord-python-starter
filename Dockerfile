@@ -38,6 +38,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 COPY --chown=app:app src/ /app/src/
 COPY --chown=app:app prompt.md /app/
+COPY --chown=app:app examples*.json /app/
 
 # https://stackoverflow.com/questions/29663459/python-app-does-not-print-anything-when-running-detached-in-docker
 CMD ["python", "-u", "src/bot.py"]

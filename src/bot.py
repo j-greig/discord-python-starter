@@ -1,5 +1,7 @@
 import logging
 import os
+import json
+from datetime import datetime
 
 import discord
 from dotenv import load_dotenv
@@ -14,18 +16,23 @@ logging.getLogger("discord").setLevel(logging.ERROR)
 
 load_dotenv()
 
-
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_PROMPT = os.getenv("BOT_PROMPT")
 BOT_NAME = os.getenv("BOT_NAME", "HONCHO").strip('"')
 BOT_NAME_VARIANTS = os.getenv("BOT_NAME_VARIANTS", "").strip('"')
 BOT_TOPICS = os.getenv("BOT_TOPICS", "").strip('"')
+USE_EXAMPLES = os.getenv("USE_EXAMPLES", "false").lower() == "true"
+EXAMPLES_FILE = os.getenv("EXAMPLES_FILE", "examples.json").strip('"')
+DEBUG_LOGGING = os.getenv("DEBUG_LOGGING", "false").lower() == "true"
 
+logger.info(f"DEBUG_LOGGING resolved to: {DEBUG_LOGGING}")
+logger.info(f"USE_EXAMPLES resolved to: {USE_EXAMPLES}")
+if USE_EXAMPLES:
+    logger.info(f"Examples file: {EXAMPLES_FILE}")
 
 MODEL_NAME = os.getenv("MODEL_NAME")
 MODEL_API_KEY = os.getenv("MODEL_API_KEY")
 APP_NAME = os.getenv("APP_NAME")
-
 
 def _build_name_variants():
     variants = set()
@@ -102,19 +109,28 @@ intents.members = True
 bot = discord.Bot(intents=intents)
 
 
-def llm(prompt, chat_history=None) -> str:
+def llm(prompt, chat_history=None, session_id=None) -> str:
     """
     Call the LLM with the given prompt and chat history.
-
-    You should expand this function with custom logic, prompts, etc.
+    Optionally enhances with examples if USE_EXAMPLES is enabled.
     """
-    extra_headers = {"X-Title": "Honcho Chatbot"}
+    extra_headers = {"X-Title": f"{BOT_NAME} Chatbot"}
     messages = []
     
     # Load and add system prompt
     system_prompt = load_system_prompt()
     messages.append({"role": "system", "content": system_prompt})
     
+    # Try to enhance with examples if enabled
+    if USE_EXAMPLES:
+        try:
+            from processors.few_shot import add_few_shot_examples
+            logger.info(f"Adding few shot examples from {EXAMPLES_FILE}")
+            messages = add_few_shot_examples(messages, EXAMPLES_FILE)
+        except ImportError:
+            logger.warning("Few-shot processor not available, continuing without examples")
+    
+    # Add chat history
     if chat_history:
         messages.extend(
             [
@@ -122,7 +138,18 @@ def llm(prompt, chat_history=None) -> str:
                 for msg in chat_history
             ]
         )
+    
+    # Add current user prompt
     messages.append({"role": "user", "content": prompt})
+
+    # Simple debug: write message thread to file
+    if DEBUG_LOGGING:
+        try:
+            session_short = session_id[-8:] if len(session_id) > 8 else session_id
+            with open(f"/tmp/sess_{session_short}_messages.json", "a") as f:
+                f.write(json.dumps({"timestamp": datetime.now().isoformat(), "messages": messages}) + "\n")
+        except Exception as e:
+            print(f"Debug write failed: {e}")
 
     try:
         completion = openai.chat.completions.create(
@@ -253,7 +280,21 @@ async def on_message(message):
     history = list(msg for msg in history_iter)
 
     async with message.channel.typing():
-        response = llm(input, history)
+        response = llm(input, history, session.id)
+
+    # Simple debug: log the interaction
+    if DEBUG_LOGGING:
+        try:
+            session_short = session.id[-8:] if len(session.id) > 8 else session.id
+            with open(f"/tmp/sess_{session_short}_interactions.json", "a") as f:
+                f.write(json.dumps({
+                    "timestamp": datetime.now().isoformat(),
+                    "user_input": input,
+                    "bot_response": response,
+                    "session_id": session.id
+                }) + "\n")
+        except Exception as e:
+            print(f"Interaction log failed: {e}")
 
     await send_discord_message(message, response)
 

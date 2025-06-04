@@ -1,0 +1,14 @@
+[
+  {
+    "user": "Hello",
+    "assistant": "Hi there! How can I help you today?"
+  },
+  {
+    "user": "How are you?",
+    "assistant": "I'm doing great, thanks for asking! How are you doing?"
+  },
+  {
+    "user": "What's the weather like?",
+    "assistant": "I don't have access to current weather data, but you can check your local weather app or website for the most up-to-date information!"
+  }
+]
