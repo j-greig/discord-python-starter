@@ -12,6 +12,8 @@ Based on PRD_UNIFIED_ENTHUSIASM_FLOW_V1.md
 import os
 import json
 import logging
+import random
+import asyncio
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
 from .base_processor import BaseProcessor, MessageContext, ProcessorError
@@ -39,6 +41,11 @@ class UnifiedEnthusiasmProcessor(BaseProcessor):
         if "anthropic/" in self.model_name:
             self.model_name = self.model_name.replace("anthropic/", "")
         
+        # Random delay configuration (1-3 seconds for breathing space)
+        self.random_delay_enabled = os.getenv("RANDOM_DELAY_ENABLED", "true").lower() == "true"
+        self.min_delay_seconds = float(os.getenv("MIN_DELAY_SECONDS", "1.0"))
+        self.max_delay_seconds = float(os.getenv("MAX_DELAY_SECONDS", "3.0"))
+        
         # Bot identity
         self.bot_name = os.getenv("BOT_NAME", "Assistant").strip('"')
         self.bot_skills = self._load_bot_skills()
@@ -60,6 +67,7 @@ class UnifiedEnthusiasmProcessor(BaseProcessor):
         self.logger.info(f"Unified enthusiasm processor initialized")
         self.logger.info(f"Skills: {self.bot_skills}")
         self.logger.info(f"Verbose Discord mode: {self.verbose_discord}")
+        self.logger.info(f"Random delay: {self.random_delay_enabled} ({self.min_delay_seconds}-{self.max_delay_seconds}s)")
         
     def _load_bot_skills(self) -> List[str]:
         """Load bot skills from environment"""
@@ -120,29 +128,32 @@ class UnifiedEnthusiasmProcessor(BaseProcessor):
             if not await self._basic_validation(context):
                 return {"should_skip": True, "reason": "basic_validation_failed"}
             
-            # Step 2: Rate limiting is now handled at top level in bot_processors.py
+            # Step 2: Add random delay for breathing space in conversation flow
+            await self._add_random_delay(context)
             
-            # Step 3: Gather complete bot context (all variables from enthusiasm_flow.md)
+            # Step 3: Rate limiting is now handled at top level in bot_processors.py
+            
+            # Step 4: Gather complete bot context (all variables from enthusiasm_flow.md)
             bot_context = await self._gather_bot_context(context)
             
-            # Step 4: Check other bot statuses before making decision
+            # Step 5: Check other bot statuses before making decision
             other_bot_statuses = await self._check_other_bot_statuses(context, bot_context)
             
-            # Step 5: Make single LLM call for reasoning + scoring
+            # Step 6: Make single LLM call for reasoning + scoring
             reasoning_response = await self._call_unified_llm(bot_context, context, other_bot_statuses)
             
-            # Step 6: Parse response
+            # Step 7: Parse response
             parsed_result = self._parse_llm_response(reasoning_response)
             
-            # Step 7: Make decision
+            # Step 8: Make decision
             should_respond = parsed_result["score"] >= self.threshold
             
-            # Step 8: Rate limiting and status are now handled at top level in bot_processors.py
+            # Step 9: Rate limiting and status are now handled at top level in bot_processors.py
             
             # Step 10: Log everything
             await self._log_decision(context, bot_context, reasoning_response, parsed_result, should_respond)
             
-            # Step 9: Prepare verbose Discord display if enabled
+            # Step 11: Prepare verbose Discord display if enabled
             verbose_prefix = ""
             if self.verbose_discord:
                 try:
@@ -187,6 +198,20 @@ class UnifiedEnthusiasmProcessor(BaseProcessor):
         # Let LLM evaluate all messages for enthusiasm scoring
         # (removed keyword fast path to allow organic participation per enthusiasm_flow.md)
         return True
+    
+    async def _add_random_delay(self, context: MessageContext) -> None:
+        """Add random delay for breathing space in conversation flow"""
+        if not self.random_delay_enabled:
+            return
+        
+        delay_seconds = random.uniform(self.min_delay_seconds, self.max_delay_seconds)
+        self.logger.info(f"🕐 Adding random delay: {delay_seconds:.1f}s for breathing space")
+        
+        try:
+            await asyncio.sleep(delay_seconds)
+        except asyncio.CancelledError:
+            self.logger.debug("Random delay cancelled")
+            raise
     
     def _has_response_triggers(self, context: MessageContext) -> bool:
         """Check if message has any triggers for responding"""
