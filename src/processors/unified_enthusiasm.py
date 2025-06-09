@@ -145,10 +145,15 @@ class UnifiedEnthusiasmProcessor(BaseProcessor):
             # Step 9: Prepare verbose Discord display if enabled
             verbose_prefix = ""
             if self.verbose_discord:
-                # Include bot_context for debug logging
-                parsed_result_with_context = parsed_result.copy()
-                parsed_result_with_context['bot_context'] = bot_context
-                verbose_prefix = self._format_verbose_prefix(parsed_result_with_context)
+                try:
+                    # Include bot_context and message content for debug logging
+                    parsed_result_with_context = parsed_result.copy()
+                    parsed_result_with_context['bot_context'] = bot_context
+                    parsed_result_with_context['message_content'] = context.content
+                    verbose_prefix = self._format_verbose_prefix(parsed_result_with_context)
+                except Exception as e:
+                    self.logger.error(f"Error formatting verbose prefix: {e}")
+                    verbose_prefix = f"🤖 **Response Decision** (enthusiasm: {parsed_result['score']}/9, threshold: {self.threshold}) → **{'RESPOND' if should_respond else 'SKIP'}**\n💭 *Error formatting debug info*\n\n--------\n"
             
             return {
                 "should_skip": not should_respond,
@@ -538,7 +543,7 @@ class UnifiedEnthusiasmProcessor(BaseProcessor):
         try:
             response = self.client.messages.create(
                 model=self.model_name,
-                max_tokens=100,  # Short response for reasoning + score
+                max_tokens=150,  # Increased for reasoning + score + activities
                 temperature=0.7,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -584,39 +589,48 @@ class UnifiedEnthusiasmProcessor(BaseProcessor):
         # Format skills
         skills_str = ", ".join(bot_context["botSkills"]) if bot_context["botSkills"] else "General conversation"
         
-        prompt = f"""You are {bot_context['botName']} in a Discord conversation.
+        prompt = f"""You are {bot_context['botName']} deciding whether to respond to the CURRENT MESSAGE below.
 
 PERSONALITY: {bot_context['botPersonality']}
 SKILLS: {skills_str}
 
-CONTEXT:
-Server: {bot_context['discord']['server']['name']} | Channel: #{bot_context['discord']['channel']['name']}
-Bots: {symbients_str}
-Humans: {humans_str}
+CURRENT MESSAGE TO ANALYZE (80% weight):
+{bot_context['lastMessage']['author']}: {bot_context['lastMessage']['content']}
 
-RECENT MESSAGES:
+RECENT CONTEXT (20% weight - decreasing importance):
 {recent_messages_str}
-CURRENT: {bot_context['lastMessage']['author']}: {bot_context['lastMessage']['content']}
 
-KEY FACTORS:
+SERVER CONTEXT:
+{bot_context['discord']['server']['name']} #{bot_context['discord']['channel']['name']} | Bots: {symbients_str} | Humans: {humans_str}
+
+DECISION FACTORS:
 • Direct mention: {bot_context['isDirectlyMentioned']}
 • Who's addressed: {bot_context['whoIsAddressed']}
 • My last response: {bot_context['conversationFlow']['messages_since_last_bot']} messages ago
 • Recently active: {'YES' if bot_context['conversationFlow']['messages_since_last_bot'] <= 1 else 'NO'}
 
-SCORING (0-9):
-9: Direct @mention of me
-7-8: Topic matches my skills, I haven't responded recently
-4-6: Relevant but not urgent
-1-3: Low relevance or I just responded
-0: Someone else @mentioned, or I'm irrelevant
+SCORING RULES (0-9):
+Focus 80% on CURRENT MESSAGE content and relevance to my skills.
 
-CRITICAL: If I responded in last 1-2 messages, reduce score by 3-4 points.
+9: CURRENT MESSAGE directly @mentions me
+7-8: CURRENT MESSAGE matches my skills AND I haven't responded recently (>2 messages ago)
+4-6: CURRENT MESSAGE somewhat relevant to my skills
+1-3: CURRENT MESSAGE low relevance OR I just responded recently
+0: CURRENT MESSAGE mentions someone else specifically OR completely irrelevant
+
+CRITICAL RULE: If I responded in last 1-2 messages → subtract 3-4 points from base score.
+
+Analyze the CURRENT MESSAGE first, then consider recent context.
 
 Respond exactly as:
-REASONING: [Brief analysis]
+REASONING: [Why the CURRENT MESSAGE does/doesn't warrant my response]
 SCORE: [0-9]
-ACTIVITIES: [4 activities, mundane to surreal]"""
+<activities>
+activity1, activity2, activity3, activity4
+</activities>
+
+Activities should be 4 comma-separated increasingly mundane-to-surreal things anyone could be doing right now (max 7 words each), unrelated to the message."""
+
         
         return prompt
     
@@ -646,7 +660,27 @@ ACTIVITIES: [4 activities, mundane to surreal]"""
                         score = max(0, min(9, score))  # Clamp to 0-9
                 elif line.startswith("ACTIVITIES:"):
                     activities_text = line.replace("ACTIVITIES:", "").strip()
-                    activities = [act.strip() for act in activities_text.split(',')]
+                    if activities_text and activities_text not in ["{nothing}", "", "none", "None"]:
+                        # Handle both comma-separated and bracket formats
+                        if activities_text.startswith('[') and activities_text.endswith(']'):
+                            # Remove brackets and split
+                            activities_text = activities_text[1:-1]
+                        activities = [act.strip().strip('"\'') for act in activities_text.split(',') if act.strip()]
+                        # Filter out empty or placeholder activities
+                        activities = [act for act in activities if act and act not in ["{nothing}", "nothing", "none", "None"]]
+                    else:
+                        activities = []
+            
+            # Parse XML activities format
+            import re
+            activities_match = re.search(r'<activities>(.*?)</activities>', response, re.DOTALL)
+            if activities_match:
+                activities_text = activities_match.group(1).strip()
+                if activities_text:
+                    activities = [act.strip().strip('"\'') for act in activities_text.split(',') if act.strip()]
+                    # Filter out empty or placeholder activities
+                    activities = [act for act in activities if act and act not in ["{nothing}", "nothing", "none", "None"]]
+            
             
             # Log what we parsed
             self.logger.info(f"🔍 Parsed - reasoning: {repr(reasoning)}, score: {score}, activities: {activities}")
@@ -687,6 +721,8 @@ ACTIVITIES: [4 activities, mundane to surreal]"""
         if parsed_result['activities']:
             activities_str = ", ".join(parsed_result['activities'])
             self.logger.info(f"🎲 ACTIVITIES: {activities_str}")
+        else:
+            self.logger.info("🎲 RANDOM ACTIVITIES: (none generated)")
         
         # Structured logging (if debug enabled)
         if self.debug:
@@ -733,13 +769,63 @@ ACTIVITIES: [4 activities, mundane to surreal]"""
             f"💭 *Why:* {parsed_result['reasoning']}",
         ]
         
+        # Add key influencing factors if bot_context is available
+        if 'bot_context' in parsed_result:
+            bot_context = parsed_result['bot_context']
+            
+            # Build key factors line
+            factors = []
+            
+            # Check if bot was mentioned
+            message_content = parsed_result.get('message_content', '').lower()
+            bot_name = bot_context.get('botName', '').lower()
+            bot_username = bot_context.get('botUsername', '').lower()
+            
+            mentioned = False
+            if f"@{bot_username}" in message_content or bot_name in message_content:
+                mentioned = True
+            
+            factors.append(f"@mentioned: {'✅' if mentioned else '❌'}")
+            
+            # Recent activity check
+            conv_flow = bot_context.get('conversationFlow', {})
+            msgs_since = conv_flow.get('messages_since_last_bot', 999)
+            time_since = conv_flow.get('time_since_last_bot')
+            
+            if time_since is not None:
+                factors.append(f"last response: {msgs_since}msg, {time_since:.0f}s ago")
+            else:
+                factors.append(f"last response: {msgs_since}msg ago")
+            
+            # Skill matching (simplified)
+            skills = bot_context.get('botSkills', [])
+            skill_match = any(skill.lower() in message_content for skill in skills[:3])  # Check first 3 skills
+            factors.append(f"skill match: {'✅' if skill_match else '❌'}")
+            
+            # Other bots availability
+            other_bots = bot_context.get('otherBotsInSession', [])
+            if isinstance(other_bots, list):
+                # otherBotsInSession is a list of bot entities
+                available_bots = sum(1 for bot in other_bots if bot.get('status', 'unknown') not in ['do_not_disturb', 'offline'])
+                total_bots = len(other_bots)
+            else:
+                # otherBotsInSession is a dict of {bot_id: status}
+                available_bots = sum(1 for status in other_bots.values() if status not in ['do_not_disturb', 'offline'])
+                total_bots = len(other_bots)
+            
+            if total_bots > 0:
+                factors.append(f"other bots: {available_bots}/{total_bots} available")
+            
+            # Add factors line
+            lines.append(f"🔍 *Key factors:* {' • '.join(factors)}")
+        
         # Add recent message logs if debug logging is enabled
         debug_logging = os.getenv("DEBUG_LOGGING", "false").lower() == "true"
         if debug_logging and 'bot_context' in parsed_result:
             lines.append("")
             lines.append("📝 **Recent Messages:**")
             recent_messages = parsed_result['bot_context'].get('recentMessages', [])
-            for msg in recent_messages[-10:]:  # Last 10 messages
+            for msg in recent_messages[-5:]:  # Last 5 messages only
                 author = msg.get('author', 'Unknown')
                 content = msg.get('content', '')
                 # Clean content: remove line breaks, limit to 50 chars
@@ -747,6 +833,15 @@ ACTIVITIES: [4 activities, mundane to surreal]"""
                 if len(clean_content) > 50:
                     clean_content = clean_content[:47] + "..."
                 lines.append(f"`{author}: {clean_content}`")
+                
+        # Add activities if available
+        if 'activities' in parsed_result and parsed_result['activities']:
+            lines.append("")
+            activities_str = ", ".join(parsed_result['activities'])
+            lines.append(f"🎲 **Random Activities:** {activities_str}")
+        elif 'activities' in parsed_result:
+            lines.append("")
+            lines.append("🎲 **Random Activities:** (none generated)")
         
         lines.append("\n--------\n")  # Clear separator before actual response
         return "\n".join(lines)

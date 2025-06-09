@@ -64,7 +64,69 @@ async def on_ready():
     # Run startup status survey
     await status_coordinator.on_startup(bot)
     
+    # Start background status monitor
+    bot.loop.create_task(background_status_monitor())
+    
     print("⚡ Waiting for messages...")
+
+async def background_status_monitor():
+    """Background task to reset DND status when rate limits expire"""
+    import asyncio
+    
+    try:
+        while True:
+            await asyncio.sleep(30)  # Check every 30 seconds
+            
+            # Skip if status coordination disabled
+            bot_status_coordination = os.getenv("BOT_STATUS_COORDINATION", "false").lower() == "true"
+            if not bot_status_coordination:
+                continue
+                
+            current_time = time.time()
+            rate_limit_per_minute = int(os.getenv("RATE_LIMIT_PER_MINUTE", "10"))
+            
+            # Thread-safe copy of channel list to avoid race conditions
+            channel_ids = list(_rate_timestamps.keys())
+            any_currently_rate_limited = False
+            
+            # Check if ANY channel is currently rate limited
+            for channel_id in channel_ids:
+                if channel_id not in _rate_timestamps:
+                    continue  # Channel removed while we were iterating
+                    
+                timestamps = _rate_timestamps[channel_id]
+                
+                # Count recent timestamps (thread-safe read)
+                recent_count = sum(1 for t in timestamps if current_time - t <= 60)
+                
+                if recent_count >= rate_limit_per_minute:
+                    any_currently_rate_limited = True
+                    break
+            
+            # Only set online if NO channels are rate limited
+            if not any_currently_rate_limited:
+                try:
+                    current_status = bot.guilds[0].me.status if bot.guilds else None
+                    if current_status == discord.Status.do_not_disturb:
+                        logger.info("🟢 Background monitor: No active rate limits, setting online")
+                        await bot.change_presence(status=discord.Status.online)
+                except Exception as e:
+                    logger.warning(f"Background status check failed: {e}")
+            
+            # Cleanup empty channel entries to prevent memory growth
+            empty_channels = [cid for cid, ts in _rate_timestamps.items() 
+                            if not ts or all(current_time - t > 120 for t in ts)]
+            for cid in empty_channels:
+                _rate_timestamps.pop(cid, None)
+                
+            if empty_channels:
+                logger.debug(f"🧹 Cleaned {len(empty_channels)} empty channel entries")
+                
+    except asyncio.CancelledError:
+        logger.info("Background status monitor cancelled")
+    except Exception as e:
+        logger.error(f"Background status monitor fatal error: {e}")
+        # Exit gracefully instead of infinite error loop
 
 
 # Global rate limiting state
@@ -109,8 +171,34 @@ async def _set_dnd_status_quick(context: MessageContext) -> None:
         return
     
     try:
-        await bot.change_presence(status=discord.Status.do_not_disturb)
-        logger.info("🔴 Set bot status to DND (rate limited - quick)")
+        # Calculate when rate limit will expire
+        rate_limit_per_minute = int(os.getenv("RATE_LIMIT_PER_MINUTE", "10"))
+        channel_id = context.channel.id
+        
+        if channel_id in _rate_timestamps and _rate_timestamps[channel_id]:
+            # Find the oldest timestamp that will expire last
+            current_time = time.time()
+            oldest_timestamp = min(_rate_timestamps[channel_id])
+            expire_time = oldest_timestamp + 60  # Rate limit window is 60 seconds
+            
+            # Format the expiry time
+            from datetime import datetime, timezone
+            expire_datetime = datetime.fromtimestamp(expire_time, tz=timezone.utc)
+            expire_str = expire_datetime.strftime("%H:%M:%S")
+            
+            activity = discord.Activity(
+                type=discord.ActivityType.watching,
+                name=f"cooldown until {expire_str}"
+            )
+        else:
+            # Fallback if no timestamps
+            activity = discord.Activity(
+                type=discord.ActivityType.watching,
+                name="rate limit cooldown"
+            )
+        
+        await bot.change_presence(status=discord.Status.do_not_disturb, activity=activity)
+        logger.info(f"🔴 Set bot status to DND (rate limited - quick) - {activity.name}")
     except Exception as e:
         logger.warning(f"Error setting DND status: {e}")
 
@@ -160,9 +248,7 @@ async def on_message(message):
         if await _is_rate_limited_quick(context):
             logger.info("🛑 Rate limited - skipping all processing")
             await _set_dnd_status_quick(context)
-            # Still notify status coordinator about rate limit state
-            context.set_data("rate_limited", True)
-            await status_coordinator.process(context)
+            # Skip status coordinator to preserve custom timestamp
             return
         
         # Step 1: Pre-record response timestamp to prevent race conditions

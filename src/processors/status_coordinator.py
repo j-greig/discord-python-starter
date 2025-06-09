@@ -103,12 +103,54 @@ class StatusCoordinatorProcessor(BaseProcessor):
         """Update the bot's Discord status"""
         try:
             if rate_limited:
-                # Set to do not disturb with custom activity
+                # Check if bot already has a custom rate limit status - don't override it
+                try:
+                    current_activity = bot.guilds[0].me.activity if bot.guilds else None
+                    if (current_activity and 
+                        current_activity.type == discord.ActivityType.custom and 
+                        "Rate limited until" in current_activity.name):
+                        self.logger.info(f"🔴 Status already set with custom timestamp: {current_activity.name}")
+                        return  # Don't override the precise timestamp
+                except Exception as e:
+                    self.logger.debug(f"Could not check current activity: {e}")
+                
+                # Calculate rate limit expiry time from global timestamps
+                activity_name = "Rate limited - please wait"
+                
+                # Try to get precise expiry time from global rate limiting data
+                try:
+                    # Import at function level to avoid circular imports
+                    import time
+                    from datetime import datetime, timezone
+                    
+                    # Access global rate timestamps (this is a bit hacky but works)
+                    import sys
+                    bot_module = sys.modules.get('__main__')
+                    if hasattr(bot_module, '_rate_timestamps'):
+                        rate_timestamps = bot_module._rate_timestamps
+                        rate_limit_per_minute = int(os.getenv("RATE_LIMIT_PER_MINUTE", "10"))
+                        
+                        # Find any channel that's currently rate limited
+                        current_time = time.time()
+                        for channel_id, timestamps in rate_timestamps.items():
+                            recent_timestamps = [t for t in timestamps if current_time - t <= 60]
+                            if len(recent_timestamps) >= rate_limit_per_minute:
+                                # Calculate when the oldest timestamp expires
+                                oldest_timestamp = min(recent_timestamps)
+                                expire_time = oldest_timestamp + 60
+                                expire_datetime = datetime.fromtimestamp(expire_time, tz=timezone.utc)
+                                expire_str = expire_datetime.strftime("%H:%M:%S")
+                                activity_name = f"Rate limited until {expire_str}"
+                                break
+                                
+                except Exception as e:
+                    self.logger.debug(f"Could not calculate precise expiry time: {e}")
+                
                 activity = discord.Activity(
-                    type=discord.ActivityType.custom,
-                    name="Rate limited - please wait"
+                    type=discord.ActivityType.watching,
+                    name=activity_name.replace("Rate limited", "cooldown")
                 )
-                self.logger.info("🔴 CHANGING STATUS → DO NOT DISTURB (rate limited)")
+                self.logger.info(f"🔴 CHANGING STATUS → DO NOT DISTURB with custom presence: {activity_name}")
                 await bot.change_presence(
                     status=discord.Status.do_not_disturb,
                     activity=activity
