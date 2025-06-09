@@ -38,8 +38,14 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 COPY --chown=app:app src/ /app/src/
 
-# Copy opus configuration files
-COPY --chown=app:app opus_base_context.json opus_system_prompt.txt /app/
+# Copy configuration files (optional - uncomment if files exist)
+#COPY --chown=app:app prompt_scramble.md /app/
+COPY --chown=app:app prompt_scramble_simple.md /app/
+# COPY --chown=app:app base_context.json /app/
+# COPY --chown=app:app system_prompt.txt /app/
 
-# https://stackoverflow.com/questions/29663459/python-app-does-not-print-anything-when-running-detached-in-docker
+# Create logs directory for enthusiasm scoring
+RUN mkdir -p /app/logs/enthusiasm && chown -R app:app /app/logs
+
+
 CMD ["python", "-u", "src/bot.py"]

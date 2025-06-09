@@ -161,3 +161,6 @@ cython_debug/
 
 *_system_prompt.txt
 *_base_context.json
+
+# Enthusiasm scoring logs
+logs/
