@@ -5,7 +5,7 @@ A starter template for Discord bots with [Honcho](https://github.com/plastic-lab
 ## Features
 
 - 🚀 **Unified Enthusiasm Architecture**: Streamlined 4-step processing pipeline for 60% complexity reduction
-- 🤖 **Multi-provider support**: Anthropic (with prompt caching), OpenAI, and OpenRouter
+- 🤖 **Anthropic integration**: Advanced prompt caching and efficient API usage
 - 🧠 **Memory management**: Persistent conversation history via Honcho
 - 🎭 **Custom personalities**: System prompts, base context, and configurable bot skills
 - 🎯 **Intelligent turn-taking**: Enthusiasm scoring (0-9) with configurable thresholds
@@ -56,10 +56,7 @@ Key configuration options:
 ```bash
 # Discord & API
 BOT_TOKEN=your_discord_bot_token
-API_PROVIDER=anthropic  # or "openai" or "openrouter"
-ANTHROPIC_API_KEY=your_key  # if using Anthropic
-OPENAI_API_KEY=your_key     # if using OpenAI/OpenRouter
-OPENAI_BASE_URL=https://openrouter.ai/api/v1  # for OpenRouter
+ANTHROPIC_API_KEY=your_anthropic_api_key
 
 # Model & Agent
 MODEL_NAME=claude-3-5-sonnet-20241022

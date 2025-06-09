@@ -1,11 +1,10 @@
 """
-LLM Processor - Handles API calls to language model providers.
+LLM Processor - Handles API calls to Anthropic.
 
 Supports:
-- Anthropic (with prompt caching)
-- OpenAI/OpenRouter
-- Unified interface for multiple providers
+- Anthropic API with prompt caching
 - Base context and chat history integration
+- Topic change activity integration
 """
 
 import os
@@ -17,9 +16,8 @@ from .base_processor import BaseProcessor, MessageContext, ProcessorError, get_h
 
 class LLMProcessor(BaseProcessor):
     """
-    Processor that handles LLM API calls for response generation.
+    Processor that handles Anthropic API calls for response generation.
     
-    Supports multiple providers with consistent interface.
     Handles prompt caching, base context, and chat history.
     """
     
@@ -30,7 +28,6 @@ class LLMProcessor(BaseProcessor):
         self.app = app
         
         # Configuration
-        self.api_provider = os.getenv("API_PROVIDER", "anthropic").lower()
         self.model_name = self._get_model_name()
         self.max_tokens = int(os.getenv("MAX_TOKENS", "1024"))
         self.enable_prompt_caching = os.getenv("ENABLE_PROMPT_CACHING", "true").lower() == "true"
@@ -42,20 +39,16 @@ class LLMProcessor(BaseProcessor):
         # Initialize API client
         self.client = self._initialize_client()
         
-        self.logger.info(f"LLM processor initialized with {self.api_provider} provider")
+        self.logger.info(f"LLM processor initialized with Anthropic")
         self.logger.info(f"Model: {self.model_name}, Max tokens: {self.max_tokens}")
         self.logger.info(f"Prompt caching: {'enabled' if self.enable_prompt_caching else 'disabled'}")
     
     def _get_model_name(self) -> str:
-        """Get model name with provider-specific defaults"""
-        model_name = os.getenv("MODEL_NAME")
-        if not model_name:
-            model_name = (
-                "claude-3-5-sonnet-20241022" if self.api_provider == "anthropic" else "gpt-4"
-            )
+        """Get model name with Anthropic defaults"""
+        model_name = os.getenv("MODEL_NAME", "claude-3-5-sonnet-20241022")
         
         # Ensure we're using correct Anthropic model names (not OpenRouter format)
-        if self.api_provider == "anthropic" and "anthropic/" in model_name:
+        if "anthropic/" in model_name:
             model_name = model_name.replace("anthropic/", "")
             
         return model_name
@@ -76,49 +69,29 @@ class LLMProcessor(BaseProcessor):
         return os.getenv("SYSTEM_PROMPT", "You are a helpful AI assistant.")
     
     def _initialize_client(self):
-        """Initialize the appropriate API client based on provider"""
-        if self.api_provider == "anthropic":
-            try:
-                import anthropic
-                
-                api_key = os.getenv("ANTHROPIC_API_KEY")
-                if not api_key:
-                    raise ProcessorError("llm", "ANTHROPIC_API_KEY not set")
-                
-                # Configure with cache TTL header if caching enabled
-                if self.enable_prompt_caching:
-                    client = anthropic.Anthropic(
-                        api_key=api_key,
-                        default_headers={"anthropic-beta": "extended-cache-ttl-2025-04-11"},
-                    )
-                    self.logger.info("Using Anthropic API with 1-hour cache TTL enabled")
-                else:
-                    client = anthropic.Anthropic(api_key=api_key)
-                    self.logger.info("Using Anthropic API")
-                
-                return client
-                
-            except ImportError:
-                raise ProcessorError("llm", "Anthropic library not installed. Run: pip install anthropic")
-                
-        elif self.api_provider == "openai":
-            try:
-                from openai import OpenAI
-                
-                api_key = os.getenv("OPENAI_API_KEY")
-                if not api_key:
-                    raise ProcessorError("llm", "OPENAI_API_KEY not set")
-                
-                base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-                client = OpenAI(api_key=api_key, base_url=base_url)
-                self.logger.info(f"Using OpenAI API with base URL: {base_url}")
-                
-                return client
-                
-            except ImportError:
-                raise ProcessorError("llm", "OpenAI library not installed. Run: pip install openai")
-        else:
-            raise ProcessorError("llm", f"Unsupported API_PROVIDER: {self.api_provider}. Use 'anthropic' or 'openai'")
+        """Initialize Anthropic API client"""
+        try:
+            import anthropic
+            
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            if not api_key:
+                raise ProcessorError("llm", "ANTHROPIC_API_KEY not set")
+            
+            # Configure with cache TTL header if caching enabled
+            if self.enable_prompt_caching:
+                client = anthropic.Anthropic(
+                    api_key=api_key,
+                    default_headers={"anthropic-beta": "extended-cache-ttl-2025-04-11"},
+                )
+                self.logger.info("Using Anthropic API with 1-hour cache TTL enabled")
+            else:
+                client = anthropic.Anthropic(api_key=api_key)
+                self.logger.info("Using Anthropic API")
+            
+            return client
+            
+        except ImportError:
+            raise ProcessorError("llm", "Anthropic library not installed. Run: pip install anthropic")
     
     def _load_base_context(self) -> List[Dict[str, Any]]:
         """Load base context from JSON file"""
@@ -150,11 +123,8 @@ class LLMProcessor(BaseProcessor):
             topic_change_requested = context.get_data("topic_change_requested", False)
             topic_change_activity = context.get_data("topic_change_activity", "")
             
-            # Generate response using appropriate provider
-            if self.api_provider == "anthropic":
-                return await self._call_anthropic(context.clean_content, chat_history, topic_change_requested, topic_change_activity)
-            elif self.api_provider == "openai":
-                return await self._call_openai(context.clean_content, chat_history, topic_change_requested, topic_change_activity)
+            # Generate response using Anthropic
+            return await self._call_anthropic(context.clean_content, chat_history, topic_change_requested, topic_change_activity)
             
         except Exception as e:
             raise ProcessorError("llm", f"Error generating response: {e}", e)
@@ -191,7 +161,7 @@ class LLMProcessor(BaseProcessor):
         
         # Add topic change instruction if requested
         if topic_change_requested and topic_change_activity:
-            topic_change_instruction = f"\n\nSPECIAL INSTRUCTION: The conversation has become repetitive/boring. Instead of directly answering the message, pivot the conversation by mentioning '{topic_change_activity}' as something you're currently doing or thinking about, and use it as a fun way to change the subject entirely. Be playful and natural about the topic shift."
+            topic_change_instruction = f"\n\nSPECIAL INSTRUCTION: The conversation has become repetitive/boring. Instead of directly answering, pivot by mentioning '{topic_change_activity}' as something you're currently doing or thinking about, and use it as a fun way to change the subject entirely. Be playful and natural about the topic shift."
             token_aware_prompt = base_system_prompt + topic_change_instruction
         else:
             token_aware_prompt = base_system_prompt
@@ -283,46 +253,3 @@ class LLMProcessor(BaseProcessor):
         
         return response.content[0].text
     
-    async def _call_openai(self, prompt: str, chat_history: List[Any], topic_change_requested: bool = False, topic_change_activity: str = "") -> str:
-        """Call OpenAI API"""
-        # Create token-aware system prompt
-        base_system_prompt = f"{self.system_prompt}\n\nIMPORTANT: Your response must be under 1200 characters. Keep answers concise and engaging. Prioritize key information and use your personality effectively within this character limit."
-        
-        # Add topic change instruction if requested
-        if topic_change_requested and topic_change_activity:
-            topic_change_instruction = f"\n\nSPECIAL INSTRUCTION: The conversation has become repetitive/boring. Instead of directly answering the message, pivot the conversation by mentioning '{topic_change_activity}' as something you're currently doing or thinking about, and use it as a fun way to change the subject entirely. Be playful and natural about the topic shift."
-            token_aware_prompt = base_system_prompt + topic_change_instruction
-        else:
-            token_aware_prompt = base_system_prompt
-        
-        messages = []
-        
-        # Add base context
-        base_context = self._load_base_context()
-        messages.extend(base_context)
-        
-        # Add chat history from Honcho
-        if chat_history:
-            messages.extend(
-                [
-                    {
-                        "role": "user" if msg.is_user else "assistant",
-                        "content": msg.content,
-                    }
-                    for msg in chat_history
-                ]
-            )
-        
-        # Add current user message
-        messages.append({"role": "user", "content": prompt})
-        
-        # For OpenAI, system prompt goes in messages array
-        openai_messages = [{"role": "system", "content": token_aware_prompt}]
-        openai_messages.extend(messages)
-        
-        response = self.client.chat.completions.create(
-            model=self.model_name, 
-            messages=openai_messages, 
-            max_tokens=self.max_tokens
-        )
-        return response.choices[0].message.content
