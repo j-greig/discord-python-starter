@@ -291,7 +291,7 @@ class UnifiedEnthusiasmProcessor(BaseProcessor):
                 "channelId": str(context.channel.id),
                 "guildId": str(context.guild.id) if context.guild else None
             },
-            "otherBotsInSession": discord_context.get("entities", {}).get("symbients", []),
+            "otherBotsInSession": [bot for bot in discord_context.get("entities", {}).get("symbients", []) if bot.get("id") != str(context.bot.user.id)],
             
             # Discord Context (our enhancement)
             "discord": discord_context,
@@ -505,7 +505,8 @@ class UnifiedEnthusiasmProcessor(BaseProcessor):
         # Check if bot is directly addressed
         who_is_directly_addressed = "nobody"
         if context.is_mentioned:
-            if any(user.name.lower() == bot_name_lower for user in context.mentioned_users):
+            # Check if the bot itself is mentioned by checking user IDs
+            if any(user.id == context.bot.user.id for user in context.mentioned_users):
                 who_is_directly_addressed = "me"
             else:
                 who_is_directly_addressed = "someone_else"
@@ -852,14 +853,8 @@ Activities should be 4 comma-separated increasingly mundane-to-surreal things an
             # Build key factors line
             factors = []
             
-            # Check if bot was mentioned
-            message_content = parsed_result.get('message_content', '').lower()
-            bot_name = bot_context.get('botName', '').lower()
-            bot_username = bot_context.get('botUsername', '').lower()
-            
-            mentioned = False
-            if f"@{bot_username}" in message_content or bot_name in message_content:
-                mentioned = True
+            # Check if bot was mentioned - use the proper Discord mention check from bot_context
+            mentioned = bot_context.get('isDirectlyMentioned', False)
             
             factors.append(f"@mentioned: {'✅' if mentioned else '❌'}")
             
@@ -875,6 +870,7 @@ Activities should be 4 comma-separated increasingly mundane-to-surreal things an
             
             # Skill matching (simplified)
             skills = bot_context.get('botSkills', [])
+            message_content = parsed_result.get('message_content', '').lower()
             skill_match = any(skill.lower() in message_content for skill in skills[:3])  # Check first 3 skills
             factors.append(f"skill match: {'✅' if skill_match else '❌'}")
             
