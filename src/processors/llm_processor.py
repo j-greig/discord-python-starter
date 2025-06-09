@@ -146,11 +146,15 @@ class LLMProcessor(BaseProcessor):
             # Get chat history from Honcho
             chat_history = self._get_chat_history(context)
             
+            # Check for topic change request
+            topic_change_requested = context.get_data("topic_change_requested", False)
+            topic_change_activity = context.get_data("topic_change_activity", "")
+            
             # Generate response using appropriate provider
             if self.api_provider == "anthropic":
-                return await self._call_anthropic(context.clean_content, chat_history)
+                return await self._call_anthropic(context.clean_content, chat_history, topic_change_requested, topic_change_activity)
             elif self.api_provider == "openai":
-                return await self._call_openai(context.clean_content, chat_history)
+                return await self._call_openai(context.clean_content, chat_history, topic_change_requested, topic_change_activity)
             
         except Exception as e:
             raise ProcessorError("llm", f"Error generating response: {e}", e)
@@ -180,10 +184,17 @@ class LLMProcessor(BaseProcessor):
             self.logger.error(f"Error getting chat history: {e}")
             return []
     
-    async def _call_anthropic(self, prompt: str, chat_history: List[Any]) -> str:
+    async def _call_anthropic(self, prompt: str, chat_history: List[Any], topic_change_requested: bool = False, topic_change_activity: str = "") -> str:
         """Call Anthropic API with prompt caching support"""
         # Create token-aware system prompt
-        token_aware_prompt = f"{self.system_prompt}\n\nIMPORTANT: You have a strict limit of {self.max_tokens} tokens for your response. Keep your answers concise and complete within this limit. If you need to provide a long response, prioritize the most important information and indicate if there's more to discuss."
+        base_system_prompt = f"{self.system_prompt}\n\nIMPORTANT: Your response must be under 1200 characters. Keep answers concise and engaging. Prioritize key information and use your personality effectively within this character limit."
+        
+        # Add topic change instruction if requested
+        if topic_change_requested and topic_change_activity:
+            topic_change_instruction = f"\n\nSPECIAL INSTRUCTION: The conversation has become repetitive/boring. Instead of directly answering the message, pivot the conversation by mentioning '{topic_change_activity}' as something you're currently doing or thinking about, and use it as a fun way to change the subject entirely. Be playful and natural about the topic shift."
+            token_aware_prompt = base_system_prompt + topic_change_instruction
+        else:
+            token_aware_prompt = base_system_prompt
         
         messages = []
         
@@ -272,10 +283,17 @@ class LLMProcessor(BaseProcessor):
         
         return response.content[0].text
     
-    async def _call_openai(self, prompt: str, chat_history: List[Any]) -> str:
+    async def _call_openai(self, prompt: str, chat_history: List[Any], topic_change_requested: bool = False, topic_change_activity: str = "") -> str:
         """Call OpenAI API"""
         # Create token-aware system prompt
-        token_aware_prompt = f"{self.system_prompt}\n\nIMPORTANT: You have a strict limit of {self.max_tokens} tokens for your response. Keep your answers concise and complete within this limit. If you need to provide a long response, prioritize the most important information and indicate if there's more to discuss."
+        base_system_prompt = f"{self.system_prompt}\n\nIMPORTANT: Your response must be under 1200 characters. Keep answers concise and engaging. Prioritize key information and use your personality effectively within this character limit."
+        
+        # Add topic change instruction if requested
+        if topic_change_requested and topic_change_activity:
+            topic_change_instruction = f"\n\nSPECIAL INSTRUCTION: The conversation has become repetitive/boring. Instead of directly answering the message, pivot the conversation by mentioning '{topic_change_activity}' as something you're currently doing or thinking about, and use it as a fun way to change the subject entirely. Be playful and natural about the topic shift."
+            token_aware_prompt = base_system_prompt + topic_change_instruction
+        else:
+            token_aware_prompt = base_system_prompt
         
         messages = []
         

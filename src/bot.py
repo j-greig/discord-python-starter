@@ -274,9 +274,16 @@ async def on_message(message):
         
         # Step 4: Generate response
         enthusiasm_score = unified_result.get("enthusiasm_score", 0)
+        topic_change = unified_result.get("topic_change", False)
+        activities = unified_result.get("activities", [])
         verbose_prefix = unified_result.get("verbose_prefix", "")
         
         logger.info(f"🚀 Generating response (enthusiasm: {enthusiasm_score})")
+        
+        # Add topic change context to message context for LLM
+        if topic_change and activities:
+            context.set_data("topic_change_requested", True)
+            context.set_data("topic_change_activity", activities[0])  # Use first activity as conversation starter
         
         async with message.channel.typing():
             response = await llm_processor.process(context)

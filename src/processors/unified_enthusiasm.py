@@ -159,6 +159,7 @@ class UnifiedEnthusiasmProcessor(BaseProcessor):
                 "should_skip": not should_respond,
                 "enthusiasm_score": parsed_result["score"],
                 "reasoning": parsed_result["reasoning"],
+                "topic_change": parsed_result.get("topic_change", False),
                 "activities": parsed_result["activities"],
                 "bot_context": bot_context,
                 "other_bot_statuses": other_bot_statuses,
@@ -169,7 +170,7 @@ class UnifiedEnthusiasmProcessor(BaseProcessor):
         except Exception as e:
             self.logger.error(f"Error in unified enthusiasm processing: {e}")
             # Fallback to safe response
-            return {"should_skip": False, "enthusiasm_score": 8, "reasoning": f"Error: {e}"}
+            return {"should_skip": False, "enthusiasm_score": 8, "reasoning": f"Error: {e}", "topic_change": False}
     
     async def _basic_validation(self, context: MessageContext) -> bool:
         """Basic message validation (from ContextBuilder logic)"""
@@ -620,16 +621,19 @@ Focus 80% on CURRENT MESSAGE content and relevance to my skills.
 
 CRITICAL RULE: If I responded in last 1-2 messages → subtract 3-4 points from base score.
 
-Analyze the CURRENT MESSAGE first, then consider recent context.
+BOREDOM DETECTION: Check if recent messages show repetitive patterns, same topics, or getting stale. If conversation feels boring/repetitive, consider suggesting topic change using one of the activities as conversation starter.
+
+Analyze the CURRENT MESSAGE first, then consider recent context for boredom.
 
 Respond exactly as:
-REASONING: [Why the CURRENT MESSAGE does/doesn't warrant my response]
+REASONING: [Why the CURRENT MESSAGE does/doesn't warrant my response + any boredom detected]
 SCORE: [0-9]
+TOPIC_CHANGE: [YES/NO - if conversation is repetitive/boring and needs topic change]
 <activities>
 activity1, activity2, activity3, activity4
 </activities>
 
-Activities should be 4 comma-separated increasingly mundane-to-surreal things anyone could be doing right now (max 7 words each), unrelated to the message."""
+Activities should be 4 comma-separated increasingly mundane-to-surreal things anyone could be doing right now (max 7 words each), unrelated to the message. If TOPIC_CHANGE=YES, make one activity especially conversation-worthy."""
 
         
         return prompt
@@ -644,6 +648,7 @@ Activities should be 4 comma-separated increasingly mundane-to-surreal things an
             
             reasoning = ""
             score = 5  # Default
+            topic_change = False
             activities = []
             
             for line in lines:
@@ -658,6 +663,9 @@ Activities should be 4 comma-separated increasingly mundane-to-surreal things an
                     if match:
                         score = int(match.group(1))
                         score = max(0, min(9, score))  # Clamp to 0-9
+                elif line.startswith("TOPIC_CHANGE:"):
+                    topic_change_text = line.replace("TOPIC_CHANGE:", "").strip().upper()
+                    topic_change = topic_change_text == "YES"
                 elif line.startswith("ACTIVITIES:"):
                     activities_text = line.replace("ACTIVITIES:", "").strip()
                     if activities_text and activities_text not in ["{nothing}", "", "none", "None"]:
@@ -683,11 +691,12 @@ Activities should be 4 comma-separated increasingly mundane-to-surreal things an
             
             
             # Log what we parsed
-            self.logger.info(f"🔍 Parsed - reasoning: {repr(reasoning)}, score: {score}, activities: {activities}")
+            self.logger.info(f"🔍 Parsed - reasoning: {repr(reasoning)}, score: {score}, topic_change: {topic_change}, activities: {activities}")
             
             return {
                 "reasoning": reasoning,
                 "score": score,
+                "topic_change": topic_change,
                 "activities": activities[:4] if activities else [],
                 "raw_response": response
             }
@@ -697,6 +706,7 @@ Activities should be 4 comma-separated increasingly mundane-to-surreal things an
             return {
                 "reasoning": f"Parse error: {e}",
                 "score": 5,
+                "topic_change": False,
                 "activities": [],
                 "raw_response": response
             }
@@ -723,6 +733,10 @@ Activities should be 4 comma-separated increasingly mundane-to-surreal things an
             self.logger.info(f"🎲 ACTIVITIES: {activities_str}")
         else:
             self.logger.info("🎲 RANDOM ACTIVITIES: (none generated)")
+            
+        # Log topic change detection
+        if parsed_result.get('topic_change', False):
+            self.logger.info("🔄 TOPIC CHANGE: Conversation detected as repetitive/boring - suggesting new direction")
         
         # Structured logging (if debug enabled)
         if self.debug:
@@ -765,8 +779,9 @@ Activities should be 4 comma-separated increasingly mundane-to-surreal things an
         decision_text = "RESPOND" if parsed_result['score'] >= self.threshold else "SKIP"
         
         lines = [
-            f"🤖 **Response Decision** (enthusiasm: {parsed_result['score']}/9, threshold: {self.threshold}) → **{decision_text}**",
-            f"💭 *Why:* {parsed_result['reasoning']}",
+            f"```yaml",
+            f"🤖 Response Decision: {parsed_result['score']}/9 (threshold: {self.threshold}) → {decision_text}",
+            f"💭 Reasoning: {parsed_result['reasoning']}",
         ]
         
         # Add key influencing factors if bot_context is available
@@ -817,13 +832,13 @@ Activities should be 4 comma-separated increasingly mundane-to-surreal things an
                 factors.append(f"other bots: {available_bots}/{total_bots} available")
             
             # Add factors line
-            lines.append(f"🔍 *Key factors:* {' • '.join(factors)}")
+            lines.append(f"🔍 Key factors: {' • '.join(factors)}")
         
         # Add recent message logs if debug logging is enabled
         debug_logging = os.getenv("DEBUG_LOGGING", "false").lower() == "true"
         if debug_logging and 'bot_context' in parsed_result:
             lines.append("")
-            lines.append("📝 **Recent Messages:**")
+            lines.append("📝 Recent Messages:")
             recent_messages = parsed_result['bot_context'].get('recentMessages', [])
             for msg in recent_messages[-5:]:  # Last 5 messages only
                 author = msg.get('author', 'Unknown')
@@ -832,16 +847,17 @@ Activities should be 4 comma-separated increasingly mundane-to-surreal things an
                 clean_content = content.replace('\n', ' ').replace('\r', ' ').strip()
                 if len(clean_content) > 50:
                     clean_content = clean_content[:47] + "..."
-                lines.append(f"`{author}: {clean_content}`")
+                lines.append(f"  {author}: {clean_content}")
                 
         # Add activities if available
         if 'activities' in parsed_result and parsed_result['activities']:
             lines.append("")
             activities_str = ", ".join(parsed_result['activities'])
-            lines.append(f"🎲 **Random Activities:** {activities_str}")
+            lines.append(f"🎲 Random Activities: {activities_str}")
         elif 'activities' in parsed_result:
             lines.append("")
-            lines.append("🎲 **Random Activities:** (none generated)")
+            lines.append("🎲 Random Activities: (none generated)")
         
-        lines.append("\n--------\n")  # Clear separator before actual response
+        lines.append("```")  # Close the code block
+        lines.append("")  # Empty line before actual response
         return "\n".join(lines)
