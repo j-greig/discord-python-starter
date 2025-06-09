@@ -557,10 +557,11 @@ class UnifiedEnthusiasmProcessor(BaseProcessor):
     def _build_unified_prompt(self, bot_context: Dict[str, Any], context: MessageContext, other_bot_statuses: Dict[str, str] = None) -> str:
         """Build unified prompt with all bot context"""
         
-        # Format recent messages
+        # Format recent messages (clean formatting to avoid LLM confusion)
         recent_messages_str = ""
         for msg in bot_context["recentMessages"][-5:]:  # Last 5 messages
-            recent_messages_str += f"{msg['author']}: {msg['content']}\n"
+            clean_content = self._clean_message_content(msg['content'])
+            recent_messages_str += f"{msg['author']}: {clean_content}\n"
         
         # Format entities with status info
         symbients = bot_context["discord"]["entities"]["symbients"]
@@ -622,7 +623,7 @@ Focus 80% on CURRENT MESSAGE content and relevance to my skills.
 9: CURRENT MESSAGE directly @mentions me
 7-8: CURRENT MESSAGE matches my skills AND I haven't responded recently (>2 messages ago)
 4-6: CURRENT MESSAGE somewhat relevant to my skills
-1-3: CURRENT MESSAGE low relevance OR I just responded recently
+1-3: CURRENT MESSAGE low relevance OR I just responded recently or topic is boring
 0: CURRENT MESSAGE mentions someone else specifically OR completely irrelevant
 
 CRITICAL RULE: If I responded in last 1-2 messages → subtract 3-4 points from base score.
@@ -643,10 +644,36 @@ TOPIC_CHANGE: [YES/NO - if conversation is repetitive/boring and needs topic cha
 activity1, activity2, activity3, activity4
 </activities>
 
-Activities should be 4 comma-separated increasingly mundane-to-surreal things anyone could be doing right now (max 7 words each), unrelated to the message. If TOPIC_CHANGE=YES, make one activity especially conversation-worthy."""
+Activities should be 4 comma-separated increasingly mundane-to-surreal things anyone could be doing right now (max 7 words each), unrelated to the message. If TOPIC_CHANGE=YES, make one activity especially conversation-worthy and novel."""
 
         
         return prompt
+    
+    def _clean_message_content(self, content: str) -> str:
+        """Clean message content to avoid LLM parsing issues"""
+        import re
+        
+        # Remove code blocks (triple backticks)
+        content = re.sub(r'```[^`]*```', '[code block]', content, flags=re.DOTALL)
+        
+        # Remove inline code (single backticks)
+        content = re.sub(r'`[^`]+`', '[code]', content)
+        
+        # Remove Discord mentions that could confuse LLM
+        content = re.sub(r'<@!?\d+>', '[user mention]', content)
+        content = re.sub(r'<#\d+>', '[channel mention]', content)
+        content = re.sub(r'<@&\d+>', '[role mention]', content)
+        
+        # Remove excessive whitespace/newlines
+        content = re.sub(r'\n+', ' ', content)
+        content = re.sub(r'\s+', ' ', content)
+        
+        # Trim and limit length for context
+        content = content.strip()
+        if len(content) > 200:
+            content = content[:197] + "..."
+            
+        return content
     
     def _parse_llm_response(self, response: str) -> Dict[str, Any]:
         """Parse LLM response for reasoning, score, and activities"""
