@@ -789,7 +789,6 @@ Activities should be 4 comma-separated increasingly mundane-to-surreal things an
         decision_text = "RESPOND" if parsed_result['score'] >= self.threshold else "SKIP"
         
         lines = [
-            f"```yaml",
             f"🤖 Response Decision: {parsed_result['score']}/9 (threshold: {self.threshold}) → {decision_text}",
             f"💭 Reasoning: {parsed_result['reasoning']}",
         ]
@@ -868,6 +867,5 @@ Activities should be 4 comma-separated increasingly mundane-to-surreal things an
             lines.append("")
             lines.append("🎲 Random Activities: (none generated)")
         
-        lines.append("```")  # Close the code block
         lines.append("")  # Empty line before actual response
         return "\n".join(lines)
