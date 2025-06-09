@@ -1,0 +1,16 @@
+services:
+  bot:
+    build: .
+    container_name: discord_bot_scramble
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - BOT_PROMPT=${BOT_PROMPT}
+      - BOT_NAME=${BOT_NAME}
+      - MODEL_NAME=${MODEL_NAME}
+      - MODEL_API_KEY=${MODEL_API_KEY}
+      - APP_NAME=${APP_NAME}
+      - HONCHO_URL=${HONCHO_URL}
+      - HONCHO_API_KEY=${HONCHO_API_KEY}
+    volumes:
+      - ./logs:/app/logs

@@ -74,6 +74,8 @@ docker build -t discord-bot . && docker run --rm --env-file .env discord-bot
 
 ## Deployment
 
+### Fly.io (Default)
+
 The project contains a generic `fly.toml` that will run a single process for the
 discord bot.
 
@@ -84,3 +86,69 @@ Use `cat .env | fly secrets import` to add the environment variables to fly.
 doesn't work well with a discord bot, so remove that line and change `min_machines_running` to `1`.**
 
 After launching, use `fly deploy` to update your deployment.
+
+### Ploi/Docker Compose
+
+#### Complete Ploi Setup Guide
+
+**1. Create Discord Application**
+- Go to Discord Developer Portal and create new application
+- Create bot and copy the BOT_TOKEN
+- Invite bot to your Discord server with appropriate permissions
+
+**2. Set up Ploi Docker Application**
+- In Ploi dashboard: Servers → Your Server → Docker → Applications
+- Click "Create application" 
+- Enter application name (e.g., `discord_bot_wibwob`)
+- Save (this creates the container directory structure)
+
+**3. Set up SSH access from server to GitHub**
+- SSH to your server: `ssh ploi@your-server-ip`
+- Generate SSH key: `ssh-keygen -t ed25519 -C "ploi@server"`
+- Add public key to GitHub: `cat ~/.ssh/id_ed25519.pub`
+- Copy output and add to GitHub → Settings → SSH keys
+
+**4. Clone repository**
+```bash
+cd ~/containers/your_app_name
+sudo chown -R ploi:ploi .
+git clone git@github.com:your-username/your-repo.git .
+```
+
+**5. Set up environment file**
+```bash
+nano .env
+```
+Add your bot configuration:
+```
+BOT_TOKEN=your-unique-bot-token-here
+BOT_PROMPT=prompt.md
+BOT_NAME=YourBotName
+# ... other variables
+```
+
+**6. Deploy the bot**
+```bash
+docker-compose up -d --build
+```
+
+**7. Verify deployment**
+- Check Ploi → Docker → Status tab for running containers
+- Verify bot is online in Discord
+- Check logs if needed: `docker-compose logs -f`
+
+#### Quick Deploy Commands
+
+After initial setup, use these commands for updates:
+```bash
+cd ~/containers/your_app_name
+sudo chown -R ploi:ploi .
+git pull origin master
+docker-compose down && docker-compose up -d --build
+```
+
+#### Important Notes
+- Each bot needs its own Discord application and BOT_TOKEN
+- Don't use `sudo` with git commands (breaks SSH key access)
+- Use SSH clone URLs (`git@github.com:...`) not HTTPS
+- Ensure docker-compose.yml has correct environment variables

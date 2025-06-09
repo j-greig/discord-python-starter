@@ -69,6 +69,10 @@ logger.info(f"Honcho app acquired with id {app.id}")
 
 openai = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=MODEL_API_KEY)
 
+# Initialize rate limiter after bot initialization
+from processors.rate_limiter import create_rate_limiter
+
+rate_limiter = create_rate_limiter()
 
 def load_system_prompt() -> str:
     """Load system prompt from prompt.md file or inline string."""
@@ -262,6 +266,10 @@ async def on_message(message):
     if not validate_message(message):
         if not relevant_message(message):
             return
+
+    # Check rate limit
+    if rate_limiter.check_rate_limit():
+        return  # Silent cooldown
 
     input = sanitize_message(message)
 
