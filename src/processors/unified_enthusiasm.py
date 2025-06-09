@@ -590,6 +590,11 @@ class UnifiedEnthusiasmProcessor(BaseProcessor):
         # Format skills
         skills_str = ", ".join(bot_context["botSkills"]) if bot_context["botSkills"] else "General conversation"
         
+        # Check for explicit boredom triggers in current message
+        boredom_triggers = ["boring", "bored", "dull", "same thing", "repetitive", "stale"]
+        current_content_lower = bot_context['lastMessage']['content'].lower()
+        has_boredom_trigger = any(trigger in current_content_lower for trigger in boredom_triggers)
+        
         prompt = f"""You are {bot_context['botName']} deciding whether to respond to the CURRENT MESSAGE below.
 
 PERSONALITY: {bot_context['botPersonality']}
@@ -597,6 +602,7 @@ SKILLS: {skills_str}
 
 CURRENT MESSAGE TO ANALYZE (80% weight):
 {bot_context['lastMessage']['author']}: {bot_context['lastMessage']['content']}
+{'[BOREDOM TRIGGER DETECTED]' if has_boredom_trigger else ''}
 
 RECENT CONTEXT (20% weight - decreasing importance):
 {recent_messages_str}
@@ -621,9 +627,13 @@ Focus 80% on CURRENT MESSAGE content and relevance to my skills.
 
 CRITICAL RULE: If I responded in last 1-2 messages → subtract 3-4 points from base score.
 
-BOREDOM DETECTION: Check if recent messages show repetitive patterns, same topics, or getting stale. If conversation feels boring/repetitive, consider suggesting topic change using one of the activities as conversation starter.
+BOREDOM DETECTION (simple and direct):
+1. If CURRENT MESSAGE contains "boring", "bored", "dull", "same thing", "repetitive" → TOPIC_CHANGE: YES
+2. If [BOREDOM TRIGGER DETECTED] appears above → TOPIC_CHANGE: YES  
+3. If last 3 recent messages all under 10 words → TOPIC_CHANGE: YES
+4. Otherwise → TOPIC_CHANGE: NO
 
-Analyze the CURRENT MESSAGE first, then consider recent context for boredom.
+Analyze CURRENT MESSAGE first, then recent context for these specific triggers.
 
 Respond exactly as:
 REASONING: [Why the CURRENT MESSAGE does/doesn't warrant my response + any boredom detected]
@@ -808,7 +818,7 @@ Activities should be 4 comma-separated increasingly mundane-to-surreal things an
             time_since = conv_flow.get('time_since_last_bot')
             
             if time_since is not None:
-                factors.append(f"last response: {msgs_since}msg, {time_since:.0f}s ago")
+                factors.append(f"last response: {msgs_since}msg/{time_since:.0f}s ago")
             else:
                 factors.append(f"last response: {msgs_since}msg ago")
             
@@ -832,7 +842,7 @@ Activities should be 4 comma-separated increasingly mundane-to-surreal things an
                 factors.append(f"other bots: {available_bots}/{total_bots} available")
             
             # Add factors line
-            lines.append(f"🔍 Key factors: {' • '.join(factors)}")
+            lines.append(f"🔍 Factors: {' • '.join(factors)}")
         
         # Add recent message logs if debug logging is enabled
         debug_logging = os.getenv("DEBUG_LOGGING", "false").lower() == "true"

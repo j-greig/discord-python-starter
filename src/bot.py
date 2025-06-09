@@ -397,6 +397,65 @@ async def processor_status(ctx):
 
 
 @bot.slash_command(
+    name="boring",
+    description="Trigger topic change by simulating a boring conversation complaint"
+)
+async def boring_command(ctx):
+    """Test command to trigger topic change behavior"""
+    await ctx.defer()
+    
+    try:
+        # Create a fake message with boredom trigger
+        class FakeMessage:
+            def __init__(self):
+                self.author = ctx.author
+                self.content = "this conversation is boring"
+                self.id = 999999999
+                self.channel = ctx.channel
+                self.guild = ctx.guild
+                self.mentions = []
+                self.mention_everyone = False
+                self.created_at = datetime.now()
+        
+        fake_message = FakeMessage()
+        test_context = MessageContext(fake_message, bot)
+        
+        # Run unified enthusiasm processing
+        result = await unified_enthusiasm.process(test_context)
+        
+        # Check if topic change was triggered
+        topic_change = result.get("topic_change", False)
+        activities = result.get("activities", [])
+        reasoning = result.get("reasoning", "No reasoning")
+        
+        if topic_change and activities:
+            response = f"""🎲 **Topic Change Triggered!**
+            
+**Boredom Detection**: ✅ Working
+**Random Activity**: {activities[0]}
+**All Activities**: {', '.join(activities)}
+
+**LLM Reasoning**: 
+```{reasoning}```
+
+The bot would now pivot the conversation using "{activities[0]}" as a conversation starter."""
+        else:
+            response = f"""❌ **Topic Change Not Triggered**
+            
+**Boredom Detection**: Failed to detect "boring" trigger
+**Activities Generated**: {len(activities)} activities
+**Reasoning**: {reasoning}
+
+Debug: topic_change={topic_change}, activities={activities}"""
+        
+        await ctx.followup.send(response)
+        
+    except Exception as e:
+        logger.error(f"Error in boring command: {e}")
+        await ctx.followup.send(f"❌ Error testing boredom detection: {str(e)}")
+
+
+@bot.slash_command(
     name="discord_context",
     description="Show current Discord context (server, channel, entities)"  
 )
