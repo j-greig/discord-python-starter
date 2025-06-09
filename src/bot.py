@@ -34,6 +34,7 @@ intents = discord.Intents.default()
 intents.messages = True
 intents.message_content = True
 intents.members = True
+intents.presences = True  # Required for accurate bot status detection
 bot = discord.Bot(intents=intents)
 
 # Honcho setup

@@ -54,6 +54,7 @@ class UnifiedEnthusiasmProcessor(BaseProcessor):
         # Logging configuration
         self.debug = os.getenv("ENTHUSIASM_DEBUG", "true").lower() == "true"
         self.verbose_discord = os.getenv("VERBOSE_REASONING", "false").lower() == "true"
+        self.show_recent_messages = os.getenv("SHOW_RECENT_MESSAGES", "false").lower() == "true"
         
         # Rate limiting moved to top level bot_processors.py
         
@@ -670,7 +671,7 @@ TOPIC_CHANGE: [YES/NO - if conversation is repetitive/boring and needs topic cha
 activity1, activity2, activity3, activity4
 </activities>
 
-Activities should be 4 comma-separated increasingly mundane-to-surreal things anyone could be doing right now (max 7 words each), unrelated to the message. If TOPIC_CHANGE=YES, make one activity especially conversation-worthy and novel."""
+Activities should be 4 comma-separated increasingly mundane-to-surreal things anyone could be doing right now (max 7 words each), unrelated to the message."""
 
         
         return prompt
@@ -891,9 +892,8 @@ Activities should be 4 comma-separated increasingly mundane-to-surreal things an
             # Add factors line
             lines.append(f"🔍 Factors: {' • '.join(factors)}")
         
-        # Add recent message logs if debug logging is enabled
-        debug_logging = os.getenv("DEBUG_LOGGING", "false").lower() == "true"
-        if debug_logging and 'bot_context' in parsed_result:
+        # Add recent message logs if enabled
+        if self.show_recent_messages and 'bot_context' in parsed_result:
             lines.append("")
             lines.append("📝 Recent Messages:")
             recent_messages = parsed_result['bot_context'].get('recentMessages', [])
