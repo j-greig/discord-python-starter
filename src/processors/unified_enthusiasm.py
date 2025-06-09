@@ -879,8 +879,11 @@ Activities should be 4 comma-separated increasingly mundane-to-surreal things an
             for msg in recent_messages[-5:]:  # Last 5 messages only
                 author = msg.get('author', 'Unknown')
                 content = msg.get('content', '')
-                # Clean content: remove line breaks, limit to 50 chars
+                # Clean content: remove line breaks, limit to 50 chars, and remove @mentions
                 clean_content = content.replace('\n', ' ').replace('\r', ' ').strip()
+                # Remove @mentions to avoid pinging users again
+                import re
+                clean_content = re.sub(r'@\w+', '@[user]', clean_content)
                 if len(clean_content) > 50:
                     clean_content = clean_content[:47] + "..."
                 lines.append(f"  {author}: {clean_content}")
