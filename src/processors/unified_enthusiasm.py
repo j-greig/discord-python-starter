@@ -625,6 +625,30 @@ class UnifiedEnthusiasmProcessor(BaseProcessor):
         
         prompt = f"""You are {bot_context['botName']} deciding whether to respond to the CURRENT MESSAGE below.
 
+<activity_generation>
+Generate exactly 4 random short activities (5-8 words each), ordered from most mundane to most surreal. Rules:
+
+• Completely ignore any message or topic context.
+• Include at least one deeply surreal or absurd item.
+• Vary genre, time period, and tone.
+• Include humans, animals, or fictional entities—real or imagined—but avoid tech, AI, science, or programming themes.
+• Avoid boring or overused tasks like “watching TV” or “eating dinner”.
+
+Think in terms of:
+- everyday routines twisted slightly
+- folkloric or dreamlike acts
+- behaviors of strange civilizations or creatures
+- poetic nonsense
+
+Examples:
+- rearranging pebbles by emotional weight
+- teaching etiquette to a family of eels
+- mourning the sunset with a choir of goats
+- knitting weather forecasts into a scarf
+
+Return only 4 activities, comma-separated, ready for use later on.
+</activity_generation>
+
 PERSONALITY: {bot_context['botPersonality']}
 SKILLS: {skills_str}
 
@@ -670,8 +694,7 @@ TOPIC_CHANGE: [YES/NO - if conversation is repetitive/boring and needs topic cha
 <activities>
 activity1, activity2, activity3, activity4
 </activities>
-
-Activities should be 4 comma-separated increasingly mundane-to-surreal things anyone could be doing right now (max 7 words each), unrelated to the message."""
+"""
 
         
         return prompt
